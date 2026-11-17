@@ -1,0 +1,41 @@
+name: PR call graph spike
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number in get-bb/bb
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install parser
+        run: npm ci --prefix .github/review-spike --ignore-scripts --no-audit --no-fund
+      - name: Fetch upstream PR as data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          pr_json=$(gh api "repos/get-bb/bb/pulls/$PR_NUMBER")
+          base_sha=$(jq -r '.base.sha' <<< "$pr_json")
+          head_sha=$(jq -r '.head.sha' <<< "$pr_json")
+          git remote add upstream https://github.com/get-bb/bb.git
+          git fetch --no-tags --depth=1 upstream "$base_sha" "pull/$PR_NUMBER/head"
+          git worktree add --detach "$RUNNER_TEMP/bb-review-head" "$head_sha"
+          node .github/review-spike/graph.mjs "$RUNNER_TEMP/bb-review-head" "$base_sha" "$head_sha" "$PR_NUMBER"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: call-graph
+          path: |
+            .github/review-spike/graph-context.json
+            .github/review-spike/call-graph.md
